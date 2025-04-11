@@ -58,7 +58,7 @@ const HomePage = () => {
     <div className="relative min-h-screen text-white overflow-hidden">
       <div className="relative z-10 max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <h1 className="text-start text-5xl sm:text-5xl font-bold text-black mb-4">
-          Explore Our Categories Capstone Blynk 1004
+          Explore Our Categories
         </h1>
         <p className="text-start text-xl text-gray-600 mb-12">
           Discover the latest trends in eco-friendly fashion
