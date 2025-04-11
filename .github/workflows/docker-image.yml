@@ -33,10 +33,10 @@ jobs:
 
     - name: Build, tag, and push Docker images
       env:
-        AWS_ACCOUNT_ID: 688567298614
+        AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         REGION: ca-central-1
-        FRONTEND_REPO: irene-frontend
-        BACKEND_REPO: irene-backend
+        FRONTEND_REPO: ${{ secrets.FRONTEND_REPO }}
+        BACKEND_REPO: ${{ secrets.BACKEND_REPO }}
       run: |
         IMAGE_TAG=$(git rev-parse --short HEAD)
 
@@ -50,3 +50,24 @@ jobs:
 
         docker push $FRONTEND_URI:$IMAGE_TAG
         docker push $BACKEND_URI:$IMAGE_TAG
+
+    - name: Upload appspec files
+      run: |
+        mkdir -p artifacts/frontend artifacts/backend
+        cp frontend/appspec.yml artifacts/frontend/
+        cp backend/appspec.yml artifacts/backend/
+        echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: frontend-artifacts
+        path: artifacts/frontend/
+        retention-days: 1
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: backend-artifacts
+        path: artifacts/backend/
+        retention-days: 1
