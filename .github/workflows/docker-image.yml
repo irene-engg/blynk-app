@@ -1,85 +1,139 @@
-name: Docker Image CI
+name: Build and Deploy
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ main ]
+
+env:
+  AWS_REGION: ca-central-1
+  ECR_FRONTEND_REPOSITORY: ${{ secrets.FRONTEND_REPO }}
+  ECR_BACKEND_REPOSITORY: ${{ secrets.BACKEND_REPO }}
+  S3_BUCKET: blynk-codepipeline-artifacts
 
 jobs:
-  build-and-push:
+  build-and-deploy:
+    name: Build and Deploy
     runs-on: ubuntu-latest
-
+    permissions:
+      id-token: write
+      contents: read
+    
     steps:
-    - name: Checkout repository
+    - name: Checkout code
       uses: actions/checkout@v4
-
+      
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v2
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ca-central-1
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-
-    - name: Install Docker Compose
-      run: sudo apt-get update && sudo apt-get install -y docker-compose
-
-    - name: Log in to Amazon ECR
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+        
+    - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
-
-    - name: Build, tag, and push Docker images
-      env:
-        AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-        REGION: ca-central-1
-        FRONTEND_REPO: ${{ secrets.FRONTEND_REPO }}
-        BACKEND_REPO: ${{ secrets.BACKEND_REPO }}
+      
+    - name: Check if ECR repositories exist
       run: |
-        IMAGE_TAG=$(git rev-parse --short HEAD)
-
-        FRONTEND_URI=$AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$FRONTEND_REPO
-        BACKEND_URI=$AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$BACKEND_REPO
-
-        docker-compose build
-
-        docker tag blynk-frontend:latest $FRONTEND_URI:$IMAGE_TAG
-        docker tag blynk-backend:latest $BACKEND_URI:$IMAGE_TAG
-
-        docker push $FRONTEND_URI:$IMAGE_TAG
-        docker push $BACKEND_URI:$IMAGE_TAG
-
-    - name: Upload appspec files
+        echo "Checking if ECR repositories exist..."
+        aws ecr describe-repositories --repository-names ${{ env.ECR_FRONTEND_REPOSITORY }} ${{ env.ECR_BACKEND_REPOSITORY }} || echo "Repositories don't exist yet. They will be created by Terraform."
+      continue-on-error: true
+      
+    - name: Build and push frontend image
+      id: build-frontend
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        push: true
+        tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Build and push backend image
+      id: build-backend
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        push: true
+        tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Extract metadata for frontend
+      id: meta-frontend
       run: |
-        mkdir -p artifacts/frontend artifacts/backend
-        cp frontend/appspec.yml artifacts/frontend/
-        cp backend/appspec.yml artifacts/backend/
-        echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-
-    - name: Upload artifacts
+        FRONTEND_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:latest"
+        echo "image=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
+        echo "Frontend image: $FRONTEND_IMAGE"
+        
+    - name: Extract metadata for backend
+      id: meta-backend
+      run: |
+        BACKEND_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:latest"
+        echo "image=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
+        echo "Backend image: $BACKEND_IMAGE"
+        
+    - name: Create imagedefinitions.json files
+      run: |
+        echo "Creating imagedefinitions.json files..."
+        echo '[{"name":"blynk-frontend","imageUri":"${{ steps.meta-frontend.outputs.image }}"}]' > frontend-imagedefinitions.json
+        echo '[{"name":"blynk-backend","imageUri":"${{ steps.meta-backend.outputs.image }}"}]' > backend-imagedefinitions.json
+        
+        echo "Frontend imagedefinitions.json content:"
+        cat frontend-imagedefinitions.json
+        
+        echo "Backend imagedefinitions.json content:"
+        cat backend-imagedefinitions.json
+        
+    - name: Upload artifact for frontend
       uses: actions/upload-artifact@v3
       with:
-        name: frontend-artifacts
-        path: artifacts/frontend/
+        name: frontend-imagedefinitions
+        path: frontend-imagedefinitions.json
         retention-days: 1
-
-    - name: Upload artifacts
+        
+    - name: Upload artifact for backend
       uses: actions/upload-artifact@v3
       with:
-        name: backend-artifacts
-        path: artifacts/backend/
+        name: backend-imagedefinitions
+        path: backend-imagedefinitions.json
         retention-days: 1
-
-    - name: Trigger CodeDeploy
+        
+    - name: Check if S3 bucket exists
+      id: check-s3
       run: |
-        aws deploy create-deployment \
-          --application-name blynk-app \
-          --deployment-group-name blynk-frontend-deployment-group \
-          --revision '{"revisionType": "AppSpecContent", "appSpecContent": {"content": "version: 0.0\nResources:\n  - TargetService:\n      Type: AWS::ECS::Service\n      Properties:\n        TaskDefinition: <TASK_DEFINITION>\n        LoadBalancerInfo:\n          ContainerName: \"blynk-frontend\"\n          ContainerPort: 80"}}'
-
-        aws deploy create-deployment \
-          --application-name blynk-app \
-          --deployment-group-name blynk-backend-deployment-group \
-          --revision '{"revisionType": "AppSpecContent", "appSpecContent": {"content": "version: 0.0\nResources:\n  - TargetService:\n      Type: AWS::ECS::Service\n      Properties:\n        TaskDefinition: <TASK_DEFINITION>\n        LoadBalancerInfo:\n          ContainerName: \"blynk-backend\"\n          ContainerPort: 5000"}}'
+        if aws s3api head-bucket --bucket ${{ env.S3_BUCKET }} 2>/dev/null; then
+          echo "s3_exists=true" >> $GITHUB_OUTPUT
+          echo "S3 bucket exists: ${{ env.S3_BUCKET }}"
+        else
+          echo "s3_exists=false" >> $GITHUB_OUTPUT
+          echo "S3 bucket does not exist: ${{ env.S3_BUCKET }}"
+        fi
+      continue-on-error: true
+        
+    - name: Copy artifacts to S3
+      if: steps.check-s3.outputs.s3_exists == 'true'
+      run: |
+        echo "Copying imagedefinitions.json files to S3..."
+        aws s3 cp frontend-imagedefinitions.json s3://${{ env.S3_BUCKET }}/frontend/imagedefinitions.json
+        aws s3 cp backend-imagedefinitions.json s3://${{ env.S3_BUCKET }}/backend/imagedefinitions.json
+        echo "Successfully copied files to S3 bucket"
+        
+    - name: Notify if S3 upload was skipped
+      if: steps.check-s3.outputs.s3_exists != 'true'
+      run: |
+        echo "Skipped S3 upload because bucket does not exist yet. Run terraform apply to create infrastructure."
+        
+    - name: Verify ECR images
+      run: |
+        echo "Verifying frontend image in ECR..."
+        aws ecr describe-images --repository-name ${{ env.ECR_FRONTEND_REPOSITORY }} --image-ids imageTag=latest || echo "Frontend image verification failed, but continuing..."
+        
+        echo "Verifying backend image in ECR..."
+        aws ecr describe-images --repository-name ${{ env.ECR_BACKEND_REPOSITORY }} --image-ids imageTag=latest || echo "Backend image verification failed, but continuing..."
+      continue-on-error: true
