@@ -71,3 +71,15 @@ jobs:
         name: backend-artifacts
         path: artifacts/backend/
         retention-days: 1
+
+    - name: Trigger CodeDeploy
+      run: |
+        aws deploy create-deployment \
+          --application-name blynk-app \
+          --deployment-group-name blynk-frontend-deployment-group \
+          --revision '{"revisionType": "AppSpecContent", "appSpecContent": {"content": "version: 0.0\nResources:\n  - TargetService:\n      Type: AWS::ECS::Service\n      Properties:\n        TaskDefinition: <TASK_DEFINITION>\n        LoadBalancerInfo:\n          ContainerName: \"blynk-frontend\"\n          ContainerPort: 80"}}'
+
+        aws deploy create-deployment \
+          --application-name blynk-app \
+          --deployment-group-name blynk-backend-deployment-group \
+          --revision '{"revisionType": "AppSpecContent", "appSpecContent": {"content": "version: 0.0\nResources:\n  - TargetService:\n      Type: AWS::ECS::Service\n      Properties:\n        TaskDefinition: <TASK_DEFINITION>\n        LoadBalancerInfo:\n          ContainerName: \"blynk-backend\"\n          ContainerPort: 5000"}}'
