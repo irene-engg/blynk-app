@@ -17,6 +17,8 @@ const app = express();
 // ✅ Make sure this matches your frontend ALB exactly
 const VITE_CLIENT_URL = process.env.CLIENT_URL || "http://frontend-alb-1490243353.ca-central-1.elb.amazonaws.com";
 
+const BACKEND_URL = process.env.BACKEND_URL || "http://internal-backend-alb-443620539.ca-central-1.elb.amazonaws.com:5000";
+
 // ✅ CORS Setup for secure cross-origin cookie sharing
 app.use(cors({
 	origin: function(origin, callback) {
