@@ -8,8 +8,8 @@ on:
 
 env:
   AWS_REGION: ca-central-1
-  ECR_FRONTEND_REPOSITORY: ${{ secrets.FRONTEND_REPO }}
-  ECR_BACKEND_REPOSITORY: ${{ secrets.BACKEND_REPO }}
+  ECR_FRONTEND_REPOSITORY: blynk-frontend
+  ECR_BACKEND_REPOSITORY: blynk-backend
   S3_BUCKET: blynk-codepipeline-artifacts
 
 jobs:
@@ -47,25 +47,31 @@ jobs:
         docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:latest
         echo "BACKEND_IMAGE=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:latest" >> $GITHUB_ENV
         
-    - name: Create and upload imagedefinitions.json files
+    - name: Create deployment artifacts
       run: |
-        # Create imagedefinitions.json files
-        echo "Creating imagedefinitions.json files..."
-        echo '[{"name":"blynk-frontend","imageUri":"'$FRONTEND_IMAGE'"}]' > frontend-imagedefinitions.json
-        echo '[{"name":"blynk-backend","imageUri":"'$BACKEND_IMAGE'"}]' > backend-imagedefinitions.json
+        # Create build directory
+        mkdir -p build
+        
+        # Create image definitions files
+        echo "Creating image definitions files..."
+        echo '[{"name":"blynk-frontend","imageUri":"'$FRONTEND_IMAGE'"}]' > build/frontend-imagedefinitions.json
+        echo '[{"name":"blynk-backend","imageUri":"'$BACKEND_IMAGE'"}]' > build/backend-imagedefinitions.json
         
         # Show content
-        echo "Frontend imagedefinitions.json:"
-        cat frontend-imagedefinitions.json
-        echo "Backend imagedefinitions.json:"
-        cat backend-imagedefinitions.json
+        echo "Image definitions content:"
+        cat build/frontend-imagedefinitions.json
+        cat build/backend-imagedefinitions.json
+        
+        # Create zip file
+        cd build
+        zip -r ../source.zip .
+        cd ..
         
         # Check if bucket exists and upload
         if aws s3api head-bucket --bucket ${{ env.S3_BUCKET }} 2>/dev/null; then
-          echo "S3 bucket exists, uploading files..."
-          aws s3 cp frontend-imagedefinitions.json s3://${{ env.S3_BUCKET }}/frontend/imagedefinitions.json
-          aws s3 cp backend-imagedefinitions.json s3://${{ env.S3_BUCKET }}/backend/imagedefinitions.json
-          echo "Successfully uploaded files to S3"
+          echo "S3 bucket exists, uploading source.zip..."
+          aws s3 cp source.zip s3://${{ env.S3_BUCKET }}/source.zip
+          echo "Successfully uploaded source.zip to S3"
         else
           echo "S3 bucket does not exist. Skipping upload. Run terraform apply to create the infrastructure first."
         fi
