@@ -16,9 +16,6 @@ jobs:
   build-and-deploy:
     name: Build and Deploy
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
     
     steps:
     - name: Checkout code
@@ -30,104 +27,48 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
-    
-    - name: Setup Docker Buildx
-      uses: docker/setup-buildx-action@v3
         
     - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
       
-    - name: Check if ECR repositories exist
-      run: |
-        echo "Checking if ECR repositories exist..."
-        aws ecr describe-repositories --repository-names ${{ env.ECR_FRONTEND_REPOSITORY }} ${{ env.ECR_BACKEND_REPOSITORY }} || echo "Repositories don't exist yet. They will be created by Terraform."
-      continue-on-error: true
-      
+    # Build and push Docker images manually instead of using actions
     - name: Build and push frontend image
-      id: build-frontend
-      uses: docker/build-push-action@v5
-      with:
-        context: ./frontend
-        push: true
-        tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      run: |
+        cd frontend
+        docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:latest .
+        docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:latest
+        echo "FRONTEND_IMAGE=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:latest" >> $GITHUB_ENV
         
     - name: Build and push backend image
-      id: build-backend
-      uses: docker/build-push-action@v5
-      with:
-        context: ./backend
-        push: true
-        tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        
-    - name: Extract metadata for frontend
-      id: meta-frontend
       run: |
-        FRONTEND_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:latest"
-        echo "image=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
-        echo "Frontend image: $FRONTEND_IMAGE"
+        cd backend
+        docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:latest .
+        docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:latest
+        echo "BACKEND_IMAGE=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:latest" >> $GITHUB_ENV
         
-    - name: Extract metadata for backend
-      id: meta-backend
+    - name: Create and upload imagedefinitions.json files
       run: |
-        BACKEND_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:latest"
-        echo "image=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
-        echo "Backend image: $BACKEND_IMAGE"
-        
-    - name: Create imagedefinitions.json files
-      run: |
+        # Create imagedefinitions.json files
         echo "Creating imagedefinitions.json files..."
-        echo '[{"name":"blynk-frontend","imageUri":"${{ steps.meta-frontend.outputs.image }}"}]' > frontend-imagedefinitions.json
-        echo '[{"name":"blynk-backend","imageUri":"${{ steps.meta-backend.outputs.image }}"}]' > backend-imagedefinitions.json
+        echo '[{"name":"blynk-frontend","imageUri":"'$FRONTEND_IMAGE'"}]' > frontend-imagedefinitions.json
+        echo '[{"name":"blynk-backend","imageUri":"'$BACKEND_IMAGE'"}]' > backend-imagedefinitions.json
         
-        echo "Frontend imagedefinitions.json content:"
+        # Show content
+        echo "Frontend imagedefinitions.json:"
         cat frontend-imagedefinitions.json
-        
-        echo "Backend imagedefinitions.json content:"
+        echo "Backend imagedefinitions.json:"
         cat backend-imagedefinitions.json
         
-    - name: Upload artifact for frontend
-      uses: actions/upload-artifact@v3
-      with:
-        name: frontend-imagedefinitions
-        path: frontend-imagedefinitions.json
-        retention-days: 1
-        
-    - name: Upload artifact for backend
-      uses: actions/upload-artifact@v3
-      with:
-        name: backend-imagedefinitions
-        path: backend-imagedefinitions.json
-        retention-days: 1
-        
-    - name: Check if S3 bucket exists
-      id: check-s3
-      run: |
+        # Check if bucket exists and upload
         if aws s3api head-bucket --bucket ${{ env.S3_BUCKET }} 2>/dev/null; then
-          echo "s3_exists=true" >> $GITHUB_OUTPUT
-          echo "S3 bucket exists: ${{ env.S3_BUCKET }}"
+          echo "S3 bucket exists, uploading files..."
+          aws s3 cp frontend-imagedefinitions.json s3://${{ env.S3_BUCKET }}/frontend/imagedefinitions.json
+          aws s3 cp backend-imagedefinitions.json s3://${{ env.S3_BUCKET }}/backend/imagedefinitions.json
+          echo "Successfully uploaded files to S3"
         else
-          echo "s3_exists=false" >> $GITHUB_OUTPUT
-          echo "S3 bucket does not exist: ${{ env.S3_BUCKET }}"
+          echo "S3 bucket does not exist. Skipping upload. Run terraform apply to create the infrastructure first."
         fi
-      continue-on-error: true
-        
-    - name: Copy artifacts to S3
-      if: steps.check-s3.outputs.s3_exists == 'true'
-      run: |
-        echo "Copying imagedefinitions.json files to S3..."
-        aws s3 cp frontend-imagedefinitions.json s3://${{ env.S3_BUCKET }}/frontend/imagedefinitions.json
-        aws s3 cp backend-imagedefinitions.json s3://${{ env.S3_BUCKET }}/backend/imagedefinitions.json
-        echo "Successfully copied files to S3 bucket"
-        
-    - name: Notify if S3 upload was skipped
-      if: steps.check-s3.outputs.s3_exists != 'true'
-      run: |
-        echo "Skipped S3 upload because bucket does not exist yet. Run terraform apply to create infrastructure."
         
     - name: Verify ECR images
       run: |
