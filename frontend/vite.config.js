@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: process.env.VITE_BACKEND_URL || "http://localhost:5000", // Fallback for development
+        target: process.env.VITE_BACKEND_URL || "http://internal-backend-alb-443620539.ca-central-1.elb.amazonaws.com:5000", // Fallback for development
         changeOrigin: true,
         secure: false,
       },
