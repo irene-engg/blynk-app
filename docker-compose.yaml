@@ -1,0 +1,28 @@
+services:
+  backend:
+    build:
+      context: ./backend  # Root directory where backend Dockerfile is located
+    image: blynk-backend:latest
+    container_name: blynk-backend
+    ports:
+      - "5000:5000"
+    working_dir: /app  # Set correct working directory
+
+    env_file:
+      - .env  # Ensure Docker picks up the .env file from the root of your project
+    command: ["node", "/app/server.js"]  # Run server properly
+    
+
+  frontend:
+    build:
+      context: ./frontend
+    image: blynk-frontend:latest
+    container_name: blynk-frontend
+    ports:
+      - "80:80"  # Nginx serves on port 80
+    volumes:
+      - ./frontend/nginx:/etc/nginx/conf.d  # Ensure nginx config is correctly mounted
+    restart: always  # Auto-restart the container if it crashes
+
+volumes:
+  frontend_node_modules:  # Define named volume for frontend node_modules
