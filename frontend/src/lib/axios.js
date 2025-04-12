@@ -13,7 +13,7 @@ import axios from "axios";
 const axiosInstance = axios.create({
 	baseURL: import.meta.env.MODE === "development" 
 		? "http://localhost:5004/api" 
-		: "http://internal-backend-alb-443620539.ca-central-1.elb.amazonaws.com:5000/api", // ALB DNS with port for production
+		: "http://backend-alb-221559160.ca-central-1.elb.amazonaws.com:5000/api", // ALB DNS with port for production
 	withCredentials: true,
 	timeout: 10000, // Add timeout to prevent long hanging requests
 	headers: {
