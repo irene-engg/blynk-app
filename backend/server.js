@@ -15,9 +15,9 @@ dotenv.config();
 const app = express();
 
 // ✅ Make sure this matches your frontend ALB exactly
-const VITE_CLIENT_URL = process.env.CLIENT_URL || "http://frontend-alb-1592384937.ca-central-1.elb.amazonaws.com";
+const VITE_CLIENT_URL = process.env.CLIENT_URL || "http://frontend-alb-615313993.ca-central-1.elb.amazonaws.com";
 
-const BACKEND_URL = process.env.BACKEND_URL || "http://backend-alb-221559160.ca-central-1.elb.amazonaws.com:5000";
+const BACKEND_URL = process.env.BACKEND_URL || "http://backend-alb-1080770143.ca-central-1.elb.amazonaws.com:5000";
 
 // ✅ CORS Setup for secure cross-origin cookie sharing
 app.use(cors({
@@ -27,7 +27,7 @@ app.use(cors({
 		
 		// List of allowed origins
 		const allowedOrigins = [
-			'http://frontend-alb-1592384937.ca-central-1.elb.amazonaws.com',
+			'http://frontend-alb-615313993.ca-central-1.elb.amazonaws.com',
 			'http://localhost:3000',
 			'http://localhost:5173',
 			'http://localhost'
